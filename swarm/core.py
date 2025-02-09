@@ -5,8 +5,10 @@ from collections import defaultdict
 from typing import List, Callable, Union
 
 # Package/library imports
-from openai import OpenAI
+# from openai import OpenAI
 
+from google.genai.types import GenerateContentConfig
+from google import genai
 
 # Local imports
 from .util import function_to_json, debug_print, merge_chunk
@@ -26,7 +28,8 @@ __CTX_VARS_NAME__ = "context_variables"
 class Swarm:
     def __init__(self, client=None):
         if not client:
-            client = OpenAI()
+            # client = OpenAI()
+            client = genai.Client()
         self.client = client
 
     def get_chat_completion(
@@ -55,18 +58,34 @@ class Swarm:
             if __CTX_VARS_NAME__ in params["required"]:
                 params["required"].remove(__CTX_VARS_NAME__)
 
-        create_params = {
-            "model": model_override or agent.model,
-            "messages": messages,
-            "tools": tools or None,
-            "tool_choice": agent.tool_choice,
-            "stream": stream,
-        }
+        # create_params = {
+        #     "model": model_override or agent.model,
+        #     "messages": messages,
+        #     "tools": tools or None,
+        #     "tool_choice": agent.tool_choice,
+        #     "stream": stream,
+        # }
 
-        if tools:
-            create_params["parallel_tool_calls"] = agent.parallel_tool_calls
+        # if tools:
+        #     create_params["parallel_tool_calls"] = agent.parallel_tool_calls
 
-        return self.client.chat.completions.create(**create_params)
+        # return self.client.chat.completions.create(**create_params)
+
+        # TODO if stream:
+        return self.client.models.generate_content(
+            model=model_override or agent.model,
+            contents=messages,
+            config=GenerateContentConfig(
+                tools=tools or None,
+                automatic_function_calling={
+                    "disable": True if agent.tool_choice else False
+                },
+                function_calling_config={
+                    "mode": "ANY" if agent.tool_choice else "AUTO",
+                    "allowed_function_names": [agent.tool_choice],
+                },
+            ),
+        )
 
     def handle_function_result(self, result, debug) -> Result:
         match result:
@@ -94,8 +113,7 @@ class Swarm:
         debug: bool,
     ) -> Response:
         function_map = {f.__name__: f for f in functions}
-        partial_response = Response(
-            messages=[], agent=None, context_variables={})
+        partial_response = Response(messages=[], agent=None, context_variables={})
 
         for tool_call in tool_calls:
             name = tool_call.function.name
@@ -112,8 +130,7 @@ class Swarm:
                 )
                 continue
             args = json.loads(tool_call.function.arguments)
-            debug_print(
-                debug, f"Processing tool call: {name} with arguments {args}")
+            debug_print(debug, f"Processing tool call: {name} with arguments {args}")
 
             func = function_map[name]
             # pass context_variables to agent functions
@@ -188,8 +205,7 @@ class Swarm:
                 merge_chunk(message, delta)
             yield {"delim": "end"}
 
-            message["tool_calls"] = list(
-                message.get("tool_calls", {}).values())
+            message["tool_calls"] = list(message.get("tool_calls", {}).values())
             if not message["tool_calls"]:
                 message["tool_calls"] = None
             debug_print(debug, "Received completion:", message)
@@ -239,6 +255,7 @@ class Swarm:
         max_turns: int = float("inf"),
         execute_tools: bool = True,
     ) -> Response:
+        # TODO: implement stream
         if stream:
             return self.run_and_stream(
                 agent=agent,
@@ -265,7 +282,7 @@ class Swarm:
                 stream=stream,
                 debug=debug,
             )
-            message = completion.choices[0].message
+            message = completion.text
             debug_print(debug, "Received completion:", message)
             message.sender = active_agent.name
             history.append(
