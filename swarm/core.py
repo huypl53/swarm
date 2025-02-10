@@ -76,7 +76,7 @@ class Swarm:
             model=model_override or agent.model,
             contents=messages,
             config=GenerateContentConfig(
-                tools=tools or None,
+                tools=agent.functions or None,
                 automatic_function_calling={
                     "disable": True if agent.tool_choice else False
                 },
